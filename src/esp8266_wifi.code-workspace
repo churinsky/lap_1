@@ -1,0 +1,24 @@
+{
+	"folders": [
+		{
+			"path": "../../esp8266_wifi"
+		},
+		{
+			"name": "bridge_2222",
+			"path": "../../bridge_2222"
+		},
+		{
+			"name": "lavadora_3.0",
+			"path": ".."
+		},
+		{
+			"name": "bridge_v2",
+			"path": "../../../../../../PlatformIO/Projects/bridge_v2"
+		},
+		{
+			"name": "coin",
+			"path": "../../coin"
+		}
+	],
+	"settings": {}
+}
