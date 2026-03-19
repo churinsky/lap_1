@@ -13,6 +13,7 @@
  ENJX2         5     7          23            24            25
  ENJF          6     8          26            27            28
  SPINF         7     9          00            00            29
+ //v2
 */
 
 #include <Arduino.h>
@@ -2592,4 +2593,4 @@ void loop()
 
     break;
   }
-}
+}         
