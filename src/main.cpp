@@ -577,10 +577,131 @@ static inline void seleccionar_valvulas_por_etapa_temp(int etapa, int temperatur
     break;
   }
 }
+
+enum : int
+{
+  PRELAV = 1,
+  LAV = 2,
+  ENJ = 3,
+  ENJX1 = 4,
+  ENJX2 = 5,
+  ENJF = 6,
+  SPINF = 7
+};
+enum : int
+{
+  PASO_LLENA = 0,
+  PASO_DRENA = 1,
+  PASO_CENTRI = 2
+};
+
+
 static inline void valvulas_off(void)
 {
   lavado.val_off();
 }
+///////////////////////////////////////////////////////////////////////////////////////////
+static const uint8_t T_DEPOSITO_S = 10U;   // ventana de detergente/suavizante
+static const uint8_t T_L6_CALIENTE_S = 3U; // temp caliente  ajustar
+
+static inline void fill_apply_destination(int etapa, uint32_t t_fill_s)
+{
+  // Estado base
+  lavado.L7_OFF();
+  lavado.L8_OFF();
+
+  switch (etapa)
+  {
+  case PRELAV:
+  case LAV:
+    // primeros 10 s: jabonera detergente
+    // después: tina directa
+    if (t_fill_s >= T_DEPOSITO_S)
+    {
+      lavado.L7_ON();
+    }
+    break;
+
+  case ENJ:
+  case ENJX1:
+  case ENJX2:
+    // siempre directo a tina
+    lavado.L7_ON();
+    break;
+
+  case ENJF:
+    // primeros 10 s: suavizante
+    if (t_fill_s < T_DEPOSITO_S)
+    {
+      lavado.L8_ON();
+    }
+    else
+    {
+      lavado.L7_ON();
+    }
+    break;
+
+  default:
+    lavado.L7_OFF();
+    lavado.L8_OFF();
+    break;
+  }
+}
+
+static inline void fill_apply_temperature(int etapa, int temperatura, uint32_t t_fill_s)
+{
+  // Enjuagues y enjuague final: por ahora siempre fríos
+  if ((etapa == ENJ) || (etapa == ENJX1) || (etapa == ENJX2) || (etapa == ENJF))
+  {
+    lavado.L6_ON();
+    lavado.L5_OFF();
+    return;
+  }
+
+  // OJO:
+  // Aquí estoy asumiendo que temperatura vale:
+  // 0 = fría, 1 = tibia, 2 = caliente
+  // Si en tu proyecto real vale 1,2,3 entonces aquí lo ajustamos.
+  switch (temperatura)
+  {
+  case 0: // FRIA
+    lavado.L6_ON();
+    lavado.L5_OFF();
+    break;
+
+  case 1: // TIBIA
+    lavado.L6_ON();
+    lavado.L5_ON();
+    break;
+
+  case 2: // CALIENTE
+    lavado.L5_ON();
+
+    if (t_fill_s < T_L6_CALIENTE_S)
+    {
+      lavado.L6_ON();
+    }
+    else
+    {
+      lavado.L6_OFF();
+    }
+    break;
+
+  default:
+    lavado.L6_OFF();
+    lavado.L5_OFF();
+    break;
+  }
+}
+
+static inline void fill_apply_strategy(int etapa, int temperatura, uint32_t t_fill_s)
+{
+  fill_apply_destination(etapa, t_fill_s);
+  fill_apply_temperature(etapa, temperatura, t_fill_s);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
 static inline void manejar_valvulas(int nivel_objetivo, int nivel_actual, int etapa, int temperatura)
 {
   if (nivel_objetivo > nivel_actual)
@@ -616,22 +737,6 @@ static inline void ui_mostrar_minutos(int mm)
   display.setSegments(segs);
 }
 
-enum : int
-{
-  PRELAV = 1,
-  LAV = 2,
-  ENJ = 3,
-  ENJX1 = 4,
-  ENJX2 = 5,
-  ENJF = 6,
-  SPINF = 7
-};
-enum : int
-{
-  PASO_LLENA = 0,
-  PASO_DRENA = 1,
-  PASO_CENTRI = 2
-};
 
 /* =======================
  MAPAS Y FORMATOS
@@ -813,6 +918,7 @@ static void motor_step_int(int *pCont, int t_izq, int t_der, int t_rep)
   }
 }
 
+/*
 void llenado_mojado(int dato_llenado,
                     int nivelde_llenado_prelavado,
                     int tiempo_giro_izquierda,
@@ -910,6 +1016,142 @@ void llenado_mojado(int dato_llenado,
     {
       contador_llenado++;
       motor_step_int(&contador_llenado, tiempo_giro_izquierda, tiempo_giro_derecha, tiempo_reposo);
+    }
+  }
+
+  datoAnterior_llenado = dato_llenado;
+}
+*/
+
+void llenado_mojado(int dato_llenado,
+                    int nivelde_llenado_prelavado,
+                    int tiempo_giro_izquierda,
+                    int tiempo_giro_derecha,
+                    int tiempo_reposo,
+                    int tiempo_aux2,
+                    int LLENADO_AGIpre,
+                    int temperatura,
+                    int ETAPA)
+{
+  (void)tiempo_aux2;
+  (void)LLENADO_AGIpre;
+
+  lavado.no_drenado();
+
+  if (dato_llenado != datoAnterior_llenado)
+  {
+    if (average <= nivelde_llenado_prelavado && llenado_error == 1)
+    {
+      time = 0;
+
+      while (1)
+      {
+        bool corte_litros = false;
+        bool corte_presostato = false;
+
+        // IMPORTANTE:
+        // Como aquí estás en un while bloqueante, el tiempo real de llenado
+        // lo tomamos de contador_error_llenado, no de tiempo_aux2.
+        uint32_t t_fill_s = (uint32_t)contador_error_llenado;
+
+        // =========================================================
+        // 1) Aplicar estrategia nueva de llenado
+        // =========================================================
+        fill_apply_strategy(ETAPA, temperatura, t_fill_s);
+
+        // =========================================================
+        // 2) Leer litros y evaluar corte por litros
+        // =========================================================
+        int L;
+        if (medidor_read_brackets_and_ciclo(&L))
+        {
+          display.setBrightness(0x0f);
+          display.showNumberDec(L, true, 4, 0);
+
+          if (!fill_step_started)
+          {
+            step_baseline_L = L;
+            step_obj_L = objetivo_litros_por_etapa((uint8_t)ETAPA);
+            fill_step_started = true;
+          }
+          else if (step_obj_L > 0)
+          {
+            long delta = (long)L - step_baseline_L;
+            if (delta >= step_obj_L)
+            {
+              corte_litros = true;
+            }
+          }
+        }
+
+        // =========================================================
+        // 3) Evaluar corte por presostato
+        // =========================================================
+        if (nivel_alcanzado())
+        {
+          corte_presostato = true;
+        }
+
+        // =========================================================
+        // 4) El corte manda por encima de todo
+        // =========================================================
+        if (corte_litros || corte_presostato)
+        {
+          lavado.FILL_OFF();
+
+          average = nivelde_llenado_prelavado + 1;
+          contador_llenado = 1;
+          t = 1;
+          llenado_error = 0;
+          llenado = 1;
+          break;
+        }
+
+        // =========================================================
+        // 5) Mantener watchdog / tiempo / motor
+        // =========================================================
+        WD_KICK();
+
+        time = millis() / 1000;
+        dato_error = time;
+
+        if (dato_error != datoAnterior_error)
+        {
+          wd_mark_tick_1s();
+          contador_error_llenado++;
+          contador_llenado++;
+
+          motor_step_int(&contador_llenado,
+                         tiempo_giro_izquierda,
+                         tiempo_giro_derecha,
+                         tiempo_reposo);
+
+          if (contador_error_llenado >= ((uint32_t)tiempo_error_llenado * 60U))
+          {
+            lanzar_error_llenado_bloqueante();
+          }
+        }
+
+        datoAnterior_error = dato_error;
+      }
+    }
+
+    // Dejo tu lógica de motor tal cual para no mover más de lo necesario
+    if (llenado == 1)
+    {
+      contador_llenado++;
+      motor_step_int(&contador_llenado,
+                     tiempo_giro_izquierda,
+                     tiempo_giro_derecha,
+                     tiempo_reposo);
+    }
+    else
+    {
+      contador_llenado++;
+      motor_step_int(&contador_llenado,
+                     tiempo_giro_izquierda,
+                     tiempo_giro_derecha,
+                     tiempo_reposo);
     }
   }
 
@@ -1456,7 +1698,7 @@ void setup()
 {
   wdt_disable();
   Serial.begin(9600);
-  Serial2.begin(115200);
+  Serial2.begin(9600);
   ddisplay.clear();
   ddisplay.setBrightness(0x0f);
 
@@ -1875,11 +2117,11 @@ void loop()
           activacion = 10;
         }
 
-       // Serial.print("etapa_2: ");
-       // Serial.println(etapa_2);
+        // Serial.print("etapa_2: ");
+        // Serial.println(etapa_2);
 
-       // Serial.print("continua: ");
-      //  Serial.println(continua);
+        // Serial.print("continua: ");
+        //  Serial.println(continua);
       }
       ////////
     }
@@ -2593,4 +2835,4 @@ void loop()
 
     break;
   }
-}         
+}

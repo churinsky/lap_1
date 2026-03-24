@@ -295,6 +295,26 @@ public:
         digitalWrite(_DEPOSITO3, LOW);
     }
 
+    void L5_ON() { digitalWrite(_TAMBOR_DEPOSITO1_CALIENTE, HIGH); }
+    void L5_OFF() { digitalWrite(_TAMBOR_DEPOSITO1_CALIENTE, LOW); }
+
+    void L6_ON() { digitalWrite(_TAMBOR_DEPOSITO1_FRIA, HIGH); }
+    void L6_OFF() { digitalWrite(_TAMBOR_DEPOSITO1_FRIA, LOW); }
+
+    void L7_ON() { digitalWrite(_DEPOSITO2, HIGH); }
+    void L7_OFF() { digitalWrite(_DEPOSITO2, LOW); }
+
+    void L8_ON() { digitalWrite(_DEPOSITO3, HIGH); }
+    void L8_OFF() { digitalWrite(_DEPOSITO3, LOW); }
+
+    void FILL_OFF()
+    {
+        L5_OFF();
+        L6_OFF();
+        L7_OFF();
+        L8_OFF();
+    }
+
     void STOP_M()
     {
         digitalWrite(_MOTOR_BAJA, LOW);
@@ -436,7 +456,7 @@ public:
         delay(1000);
         digitalWrite(_TAMBOR_DEPOSITO1_CALIENTE, LOW);
         digitalWrite(_DEPOSITO2, HIGH);
-       delay(1000);
+        delay(1000);
         digitalWrite(_DEPOSITO3, HIGH);
         delay(700);
         no_drenado();
