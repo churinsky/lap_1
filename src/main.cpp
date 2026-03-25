@@ -168,7 +168,7 @@ static void debug_mostrar_reset(void)
 }
 
 #define eprom 0 // actualizar parametros 1 ,, para bloquearlos 0///////////////////////
-#define opl 0   // para quitar comunicacion y jale opl, 0 ,1 para activar comunicacion
+#define opl 1   // para quitar comunicacion y jale opl, 0 ,1 para activar comunicacion
 
 // --- reset remoto del medidor de agua ---
 static void medidor_reset_remote(void)
@@ -601,8 +601,8 @@ static inline void valvulas_off(void)
   lavado.val_off();
 }
 ///////////////////////////////////////////////////////////////////////////////////////////
-static const uint8_t T_DEPOSITO_S = 10U;   // ventana de detergente/suavizante
-static const uint8_t T_L6_CALIENTE_S = 3U; // temp caliente  ajustar
+static const uint8_t T_DEPOSITO_S = 20U;   // ventana de detergente/suavizante
+static const uint8_t T_L6_CALIENTE_S = 10U; // temp caliente  ajustar
 
 static inline void fill_apply_destination(int etapa, uint32_t t_fill_s)
 {
@@ -650,48 +650,87 @@ static inline void fill_apply_destination(int etapa, uint32_t t_fill_s)
 
 static inline void fill_apply_temperature(int etapa, int temperatura, uint32_t t_fill_s)
 {
-  // Enjuagues y enjuague final: por ahora siempre fríos
-  if ((etapa == ENJ) || (etapa == ENJX1) || (etapa == ENJX2) || (etapa == ENJF))
+  // Estado base: evitar arrastres viejos
+  lavado.L5_OFF();
+  lavado.L6_OFF();
+
+  // =========================================================
+  // ENJUAGUES INTERMEDIOS: directos a tina y fríos
+  // =========================================================
+  if ((etapa == ENJ) || (etapa == ENJX1) || (etapa == ENJX2))
   {
-    lavado.L6_ON();
-    lavado.L5_OFF();
+    // En tu definición actual, en tina directa fría/tibia no usan L5 ni L6
     return;
   }
 
-  // OJO:
-  // Aquí estoy asumiendo que temperatura vale:
-  // 0 = fría, 1 = tibia, 2 = caliente
-  // Si en tu proyecto real vale 1,2,3 entonces aquí lo ajustamos.
-  switch (temperatura)
+  // =========================================================
+  // ENJUAGUE FINAL
+  // =========================================================
+  if (etapa == ENJF)
   {
-  case 0: // FRIA
-    lavado.L6_ON();
-    lavado.L5_OFF();
-    break;
-
-  case 1: // TIBIA
-    lavado.L6_ON();
-    lavado.L5_ON();
-    break;
-
-  case 2: // CALIENTE
-    lavado.L5_ON();
-
-    if (t_fill_s < T_L6_CALIENTE_S)
+    if (t_fill_s < T_DEPOSITO_S)
     {
+      // Primeros 10 s: suavizante con fría
       lavado.L6_ON();
     }
     else
     {
-      lavado.L6_OFF();
+      // Después: tina directa fría, sin L5 ni L6
+      // ambos ya quedaron OFF arriba
     }
-    break;
-
-  default:
-    lavado.L6_OFF();
-    lavado.L5_OFF();
-    break;
+    return;
   }
+
+  // =========================================================
+  // PRELAV / LAV
+  // =========================================================
+  if ((etapa == PRELAV) || (etapa == LAV))
+  {
+    if (t_fill_s < T_DEPOSITO_S)
+    {
+      // ----- FASE JABONERA -----
+      switch (temperatura)
+      {
+      case 0: // FRIA
+        lavado.L6_ON();
+        break;
+
+      case 1: // TIBIA
+        lavado.L6_ON();
+        lavado.L5_ON();
+        break;
+
+      case 2: // CALIENTE
+        lavado.L5_ON();
+
+        if (t_fill_s < T_L6_CALIENTE_S)
+        {
+          lavado.L6_ON();
+        }
+        break;
+
+      default:
+        // ambos OFF
+        break;
+      }
+    }
+    else
+    {
+      // ----- FASE TINA DIRECTA -----
+      // Fría y tibia: L5 OFF, L6 OFF
+      // Caliente: solo L5 ON
+      if (temperatura == 2)
+      {
+        lavado.L5_ON();
+      }
+    }
+
+    return;
+  }
+
+  // =========================================================
+  // Cualquier otro caso: todo OFF
+  // =========================================================
 }
 
 static inline void fill_apply_strategy(int etapa, int temperatura, uint32_t t_fill_s)
