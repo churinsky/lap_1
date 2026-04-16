@@ -168,7 +168,12 @@ static void debug_mostrar_reset(void)
 }
 
 #define eprom 0 // actualizar parametros 1 ,, para bloquearlos 0///////////////////////
-#define opl 1   // para quitar comunicacion y jale opl, 0 ,1 para activar comunicacion
+#define opl 0   // para quitar comunicacion y jale opl, 0 ,1 para activar comunicacion
+
+#define PUERTA_VERSION_VIEJA 0
+#define PUERTA_VERSION_NUEVA 1
+
+#define PUERTA_VERSION PUERTA_VERSION_NUEVA
 
 // --- reset remoto del medidor de agua ---
 static void medidor_reset_remote(void)
@@ -595,13 +600,12 @@ enum : int
   PASO_CENTRI = 2
 };
 
-
 static inline void valvulas_off(void)
 {
   lavado.val_off();
 }
 ///////////////////////////////////////////////////////////////////////////////////////////
-static const uint8_t T_DEPOSITO_S = 20U;   // ventana de detergente/suavizante
+static const uint8_t T_DEPOSITO_S = 20U;    // ventana de detergente/suavizante
 static const uint8_t T_L6_CALIENTE_S = 10U; // temp caliente  ajustar
 
 static inline void fill_apply_destination(int etapa, uint32_t t_fill_s)
@@ -776,7 +780,6 @@ static inline void ui_mostrar_minutos(int mm)
   display.setSegments(segs);
 }
 
-
 /* =======================
  MAPAS Y FORMATOS
  =======================
@@ -860,6 +863,18 @@ static inline void enviar_evento(uint8_t ev_code)
   }
 }
 
+static inline void wdt_delay_ms(uint32_t ms)
+{
+  while (ms > 0U)
+  {
+    const uint16_t chunk = (ms > 250U) ? 250U : (uint16_t)ms;
+    delay(chunk);
+    WD_KICK();
+
+    ms -= (uint32_t)chunk;
+  }
+}
+
 static void lanzar_error_llenado_bloqueante(void)
 {
   lavado.drenado();
@@ -873,7 +888,13 @@ static void lanzar_error_llenado_bloqueante(void)
   delay(3000);
   if (aux_55 == 0)
   {
+#if (PUERTA_VERSION == PUERTA_VERSION_NUEVA)
+    digitalWrite(PUERTA, LOW);         // K1 OFF
+    wdt_delay_ms(1000U);               // espera 1 s
+    digitalWrite(PUERTA_OFF_110, LOW); // K2 OFF
+#else
     lavado.PUERTA_OFF();
+#endif
 #if continental == 1
     lavado.r_continental_off_1();
     delay(200);
@@ -1601,11 +1622,23 @@ bool bloqueo_puerta_loop(unsigned long &lastTime,
 {
   int p_continental = 5;
   uint32_t wd_last_ms = (uint32_t)millis(); // <- AQUÍ, una sola vez
-
+  if ((digitalRead(BUTT_BOT) == 0) && (digitalRead(BUTT_TOP) == 0))
+  {
+    return true;
+  }
   while (((digitalRead(BUTT_BOT) == 1) && (digitalRead(BUTT_TOP) == 1) && (aminutos > 0) && (auxiliar_puerta_error == 0)) ||
          ((digitalRead(BUTT_BOT) == 0) && (digitalRead(BUTT_TOP) == 1) && (aminutos > 0) && (auxiliar_puerta_error == 0)))
   {
     wd_keepalive_tick_1s(&wd_last_ms);
+
+    if ((digitalRead(BUTT_BOT) == 1) && (digitalRead(BUTT_TOP) == 1))
+    {
+      display.setBrightness(0x0f);
+      display.setSegments(SEG_DOOR);
+      wd_delay_alive(500U, &wd_last_ms);
+      ddisplay.clear();
+      return false;
+    }
 
     if ((digitalRead(BUTT_BOT) == 0) && (digitalRead(BUTT_TOP) == 1))
     {
@@ -1638,15 +1671,23 @@ bool bloqueo_puerta_loop(unsigned long &lastTime,
       }
 #endif
 
+#if (PUERTA_VERSION == PUERTA_VERSION_NUEVA)
+      digitalWrite(PUERTA, HIGH); // K1 ON
+      ddisplay.clear();
+      wd_delay_alive(1000U, &wd_last_ms); // esperar 1 s
+      digitalWrite(PUERTA_OFF_110, HIGH); // K2 ON
+      wd_delay_alive(500U, &wd_last_ms);  // pequeño margen
+#else
       lavado.PUERTA_ON();
       ddisplay.clear();
-      wd_delay_alive(1000U, &wd_last_ms); // <- en vez de delay(1000)
+      wd_delay_alive(1000U, &wd_last_ms);
+#endif
     }
 
     if ((digitalRead(BUTT_TOP) == 0) && (digitalRead(BUTT_BOT) == 0))
     {
       ddisplay.clear();
-      wd_delay_alive(500U, &wd_last_ms); // <- en vez de delay(500)
+      wd_delay_alive(500U, &wd_last_ms);
       return true;
     }
 
@@ -1658,8 +1699,15 @@ bool bloqueo_puerta_loop(unsigned long &lastTime,
     lavado.drenado();
     lavado.val_off();
     lavado.STOP_M();
+
+#if (PUERTA_VERSION == PUERTA_VERSION_NUEVA)
+    digitalWrite(PUERTA, LOW);          // K1 OFF
+    wd_delay_alive(1000U, &wd_last_ms); // espera 1 s
+    digitalWrite(PUERTA_OFF_110, LOW);  // K2 OFF
+#else
     lavado.PUERTA_OFF();
-    wd_delay_alive(3000U, &wd_last_ms); // <- en vez de delay(3000)
+    wd_delay_alive(3000U, &wd_last_ms);
+#endif
 
     contador_errores_e6++;
     if (contador_errores_e6 >= 20)
@@ -1677,17 +1725,6 @@ bool bloqueo_puerta_loop(unsigned long &lastTime,
 }
 
 // ====== WDT helpers ======
-static inline void wdt_delay_ms(uint32_t ms)
-{
-  while (ms > 0U)
-  {
-    const uint16_t chunk = (ms > 250U) ? 250U : (uint16_t)ms;
-    delay(chunk);
-    WD_KICK();
-
-    ms -= (uint32_t)chunk;
-  }
-}
 
 int obtenerPrimeraEtapaActiva(void)
 {
@@ -1744,6 +1781,9 @@ void setup()
   debug_mostrar_reset();
 
   pinMode(A0, INPUT_PULLUP);
+  pinMode(A1, OUTPUT);
+  digitalWrite(A1, LOW); // estado seguro al arrancar
+
   menu_agua.cases(DEFAULT_nivel_agua, 3);
   menu_temp.cases(DEFAULT_tipo_temperatura, 2);
   menu_ciclo.cases(DEFAULT_tipo_ciclo, 1);
@@ -1931,18 +1971,29 @@ void loop()
 
       display.setBrightness(0x0f);
       display.setSegments(SEG_E5);
-      lavado.PUERTA_ON();
-      delay(2000);
-      WD_KICK();
 
+#if (PUERTA_VERSION == PUERTA_VERSION_NUEVA)
+      digitalWrite(PUERTA, HIGH); // K1 ON
+      wdt_delay_ms(1000U);
+      digitalWrite(PUERTA_OFF_110, HIGH); // K2 ON
+      wdt_delay_ms(3000U);                // pequeño pulso para asegurar estado
+
+      digitalWrite(PUERTA, LOW);         // K1 OFF
+      wdt_delay_ms(1000U);               // espera 1 s
+      digitalWrite(PUERTA_OFF_110, LOW); // K2 OFF
+      wdt_delay_ms(3000U);               // pequeño pulso para asegurar estado
+#else
       lavado.PUERTA_OFF();
       delay(2000);
+#endif
+
       contador_errores_e5++;
       if (contador_errores_e5 >= 20)
       {
         enviar_evento(EV_E5);
         contador_errores_e5 = 0;
       }
+
       if (digitalRead(BUTT_TOP) == 1)
       {
         while (1)
@@ -2726,6 +2777,9 @@ void loop()
           enviar_evento(EV_INICIO);
           instruccionEnviada29 = true;
         }
+
+        digitalWrite(A1, HIGH); // <- ciclo iniciado para interlock
+
         __clave_progreso_prev = -1;
 
         ddisplay.clear();
@@ -2737,9 +2791,17 @@ void loop()
         {
 
           WD_KICK();
-
+          static uint32_t wd_wait_puerta_ms = 0U;
           if (!bloqueo_puerta_loop(lastTime, contador_errores_e6, aminutos, auxiliar_puerta_error))
           {
+            if ((uint32_t)(millis() - wd_wait_puerta_ms) >= 1000U)
+            {
+              wd_wait_puerta_ms = (uint32_t)millis();
+              wd_mark_tick_1s();
+            }
+
+            WD_KICK();
+            continue;
           }
           time = millis() / 1000;
           dato2 = time;
@@ -2777,7 +2839,13 @@ void loop()
             display.showNumberDec(asegundos, true, 2, 2);
             if (asegundos == 0)
             {
+#if (PUERTA_VERSION == PUERTA_VERSION_NUEVA)
+              digitalWrite(PUERTA, LOW);         // K1 OFF
+              wdt_delay_ms(1000U);               // espera 1 s
+              digitalWrite(PUERTA_OFF_110, LOW); // K2 OFF
+#else
               lavado.PUERTA_OFF();
+#endif
               ciclo_str = DEFAULT_tipo_ciclo;
               etapa_str = 0; /////0
               paso_str = 51; /////0
@@ -2801,7 +2869,7 @@ void loop()
 
               unsigned long Lfinal = ciclo_total_agua_L();
               enviar_evento(EVT_FIN);
-
+              digitalWrite(A1, LOW); // <- ciclo terminadoF
               ciclo_end_agua();
               mostrar_total_ciclo_display(Lfinal);
               while (1)

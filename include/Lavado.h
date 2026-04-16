@@ -281,8 +281,8 @@ public:
         pinMode(_TAMBOR_DEPOSITO1_CALIENTE, OUTPUT);
         pinMode(_DEPOSITO2, OUTPUT);
         pinMode(_DEPOSITO3, OUTPUT);
-        pinMode(_BUTT_TOP, INPUT_PULLUP);
-        pinMode(_BUTT_BOT, INPUT_PULLUP);
+        pinMode(_BUTT_TOP, INPUT);
+        pinMode(_BUTT_BOT, INPUT);
 
         digitalWrite(_MOTOR_BAJA, LOW);
         digitalWrite(_MOTOR_ALTA, LOW);
